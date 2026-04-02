@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import glob as glob_module
 import json
 import sys
 from pathlib import Path
@@ -11,13 +12,70 @@ from urllib.error import HTTPError, URLError
 
 from core import MAX_SAMPLE_COUNT, download_image_bytes, predict_360
 
+_GLOB_CHARS = frozenset("*?[")
 
-def main():
+
+def _resolve_paths(raw_paths: list[Path]) -> list[Path]:
+    """Expand any glob patterns in raw_paths and return sorted, deduplicated paths."""
+    resolved = []
+    for p in raw_paths:
+        if _GLOB_CHARS & set(str(p)):
+            matches = sorted(glob_module.glob(str(p), recursive=True))
+            if not matches:
+                print(f"Error: no files matched '{p}'", file=sys.stderr)
+                sys.exit(1)
+            resolved.extend(Path(m) for m in matches)
+        else:
+            resolved.append(p.expanduser().resolve())
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for p in resolved:
+        if p not in seen:
+            seen.add(p)
+            unique.append(p)
+    return unique
+
+
+def _process_file(path: Path, args: argparse.Namespace) -> dict:
+    """Run predict_360 on a single file and return the result dict."""
+    return predict_360(
+        path.read_bytes(),
+        fov_deg=args.fov,
+        inlier_threshold_deg=args.inlier_threshold_deg,
+        sample_count=args.sample_count,
+    )
+
+
+def _print_summary(result: dict, label: str | None = None) -> None:
+    """Print a human-readable summary of a single prediction result."""
+    if label:
+        print(f"\n=== {label} ===")
+    roll, pitch = result["roll"], result["pitch"]
+    inlier_ratio, mae, rmse = result["inlier_ratio"], result["mae_inlier_deg"], result["rmse_inlier_deg"]
+    print(f"Roll:         {f'{roll:.3f}°' if roll is not None else 'N/A'}")
+    print(f"Pitch:        {f'{pitch:.3f}°' if pitch is not None else 'N/A'}")
+    print(f"Inliers:      {result['inlier_count']}/{result['sample_count']} ({f'{inlier_ratio:.1%}' if inlier_ratio is not None else 'N/A'})")
+    print(f"MAE (inlier): {f'{mae:.3f}°' if mae is not None else 'N/A'}")
+    print(f"RMSE(inlier): {f'{rmse:.3f}°' if rmse is not None else 'N/A'}")
+
+
+def _strip_samples(result: dict) -> dict:
+    return {k: v for k, v in result.items() if k != "samples"}
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Estimate pitch and roll of a 360° equirectangular image."
     )
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--file", "-f", type=Path, help="Path to the input image file.")
+    source.add_argument(
+        "--file", "-f",
+        type=Path,
+        nargs="+",
+        metavar="PATH",
+        help='One or more image files or patterns (e.g. "images/*.jpg", "**/*.jpg").',
+    )
     source.add_argument("--url", "-u", type=str, help="URL of the input image.")
 
     parser.add_argument(
@@ -45,7 +103,7 @@ def main():
         "--json",
         action="store_true",
         dest="output_json",
-        help="Output the full result as JSON instead of a human-readable summary.",
+        help="Output results as JSON instead of a human-readable summary.",
     )
     parser.add_argument(
         "--no-samples",
@@ -62,51 +120,62 @@ def main():
     if not (4 <= args.sample_count <= MAX_SAMPLE_COUNT):
         parser.error(f"--sample-count must be between 4 and {MAX_SAMPLE_COUNT}.")
 
-    if args.file:
-        path = args.file.expanduser().resolve()
-        if not path.exists():
-            print(f"Error: file not found: {path}", file=sys.stderr)
-            sys.exit(1)
-        image_bytes = path.read_bytes()
-    else:
+    # --- URL mode ---
+    if args.url:
         try:
             image_bytes = download_image_bytes(args.url)
         except (ValueError, HTTPError, URLError, TimeoutError) as e:
             print(f"Error downloading image: {e}", file=sys.stderr)
             sys.exit(1)
+        try:
+            result = predict_360(
+                image_bytes,
+                fov_deg=args.fov,
+                inlier_threshold_deg=args.inlier_threshold_deg,
+                sample_count=args.sample_count,
+            )
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        if args.output_json:
+            print(json.dumps(_strip_samples(result) if args.no_samples else result, indent=2))
+        else:
+            _print_summary(result)
+        return
 
-    try:
-        result = predict_360(
-            image_bytes,
-            fov_deg=args.fov,
-            inlier_threshold_deg=args.inlier_threshold_deg,
-            sample_count=args.sample_count,
-        )
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+    # --- File mode (single paths or patterns) ---
+    paths = _resolve_paths(args.file)
+    missing = [p for p in paths if not p.exists()]
+    if missing:
+        for p in missing:
+            print(f"Error: file not found: {p}", file=sys.stderr)
         sys.exit(1)
 
+    multi = len(paths) > 1
+    all_results = []
+    exit_code = 0
+
+    for path in paths:
+        try:
+            result = _process_file(path, args)
+        except ValueError as e:
+            print(f"Error [{path.name}]: {e}", file=sys.stderr)
+            exit_code = 1
+            if args.output_json:
+                all_results.append({"file": str(path), "status": "error", "error": str(e)})
+            continue
+
+        if args.output_json:
+            entry = _strip_samples(result) if args.no_samples else result
+            all_results.append({"file": str(path), **entry})
+        else:
+            _print_summary(result, label=path.name if multi else None)
+
     if args.output_json:
-        if args.no_samples:
-            result = {k: v for k, v in result.items() if k != "samples"}
-        print(json.dumps(result, indent=2))
-    else:
-        roll = result["roll"]
-        pitch = result["pitch"]
-        inlier_count = result["inlier_count"]
-        inlier_ratio = result["inlier_ratio"]
-        mae = result["mae_inlier_deg"]
-        rmse = result["rmse_inlier_deg"]
-        roll_str = f"{roll:.3f}°" if roll is not None else "N/A"
-        pitch_str = f"{pitch:.3f}°" if pitch is not None else "N/A"
-        ratio_str = f"{inlier_ratio:.1%}" if inlier_ratio is not None else "N/A"
-        mae_str = f"{mae:.3f}°" if mae is not None else "N/A"
-        rmse_str = f"{rmse:.3f}°" if rmse is not None else "N/A"
-        print(f"Roll:         {roll_str}")
-        print(f"Pitch:        {pitch_str}")
-        print(f"Inliers:      {inlier_count}/{result['sample_count']} ({ratio_str})")
-        print(f"MAE (inlier): {mae_str}")
-        print(f"RMSE(inlier): {rmse_str}")
+        output = all_results if multi else all_results[0]
+        print(json.dumps(output, indent=2))
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
