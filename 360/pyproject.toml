@@ -16,6 +16,7 @@ dependencies = [
     "geocalib",
     "flask",
     "werkzeug",
+    "pyexiftool",
 ]
 
 [project.scripts]

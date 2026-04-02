@@ -13,6 +13,8 @@ from urllib.error import HTTPError, URLError
 from core import MAX_SAMPLE_COUNT, download_image_bytes, predict_360
 
 _GLOB_CHARS = frozenset("*?[")
+_EXIF_ROLL_TAG = "XMP-GPano:PoseRollDegrees"
+_EXIF_PITCH_TAG = "XMP-GPano:PosePitchDegrees"
 
 
 def _resolve_paths(raw_paths: list[Path]) -> list[Path]:
@@ -27,7 +29,6 @@ def _resolve_paths(raw_paths: list[Path]) -> list[Path]:
             resolved.extend(Path(m) for m in matches)
         else:
             resolved.append(p.expanduser().resolve())
-    # Deduplicate while preserving order
     seen = set()
     unique = []
     for p in resolved:
@@ -35,6 +36,25 @@ def _resolve_paths(raw_paths: list[Path]) -> list[Path]:
             seen.add(p)
             unique.append(p)
     return unique
+
+
+def _read_exif_rp(et, path: Path) -> dict[str, float | None]:
+    """Read existing PoseRollDegrees and PosePitchDegrees from a file."""
+    tags = et.get_tags(str(path), tags=[_EXIF_ROLL_TAG, _EXIF_PITCH_TAG])
+    raw = tags[0] if tags else {}
+    return {
+        "roll": raw.get(_EXIF_ROLL_TAG),
+        "pitch": raw.get(_EXIF_PITCH_TAG),
+    }
+
+
+def _write_exif_rp(et, path: Path, roll: float, pitch: float) -> None:
+    """Write PoseRollDegrees and PosePitchDegrees to a file (overwrites original)."""
+    et.set_tags(
+        str(path),
+        {_EXIF_ROLL_TAG: roll, _EXIF_PITCH_TAG: -pitch},
+        ["-overwrite_original"],
+    )
 
 
 def _process_file(path: Path, args: argparse.Namespace) -> dict:
@@ -47,10 +67,16 @@ def _process_file(path: Path, args: argparse.Namespace) -> dict:
     )
 
 
-def _print_summary(result: dict, label: str | None = None) -> None:
+def _print_summary(result: dict, label: str | None = None, exif_before: dict | None = None) -> None:
     """Print a human-readable summary of a single prediction result."""
     if label:
         print(f"\n=== {label} ===")
+    if exif_before:
+        r, p = exif_before.get("roll"), exif_before.get("pitch")
+        if r is not None or p is not None:
+            r_str = f"{r:.3f}°" if r is not None else "—"
+            p_str = f"{p:.3f}°" if p is not None else "—"
+            print(f"EXIF before:  roll={r_str}  pitch={p_str}")
     roll, pitch = result["roll"], result["pitch"]
     inlier_ratio, mae, rmse = result["inlier_ratio"], result["mae_inlier_deg"], result["rmse_inlier_deg"]
     print(f"Roll:         {f'{roll:.3f}°' if roll is not None else 'N/A'}")
@@ -110,6 +136,15 @@ def main() -> None:
         action="store_true",
         help="Omit per-sample details from JSON output.",
     )
+    parser.add_argument(
+        "--write-exif",
+        action="store_true",
+        help=(
+            "Read existing XMP-GPano pose tags before prediction and display them, "
+            "then write the estimated roll/pitch back to the file. "
+            "Requires exiftool to be installed. Only applies to --file mode."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -119,6 +154,8 @@ def main() -> None:
         parser.error("--inlier-threshold-deg must be between 0.01 and 90.")
     if not (4 <= args.sample_count <= MAX_SAMPLE_COUNT):
         parser.error(f"--sample-count must be between 4 and {MAX_SAMPLE_COUNT}.")
+    if args.write_exif and args.url:
+        parser.error("--write-exif is only supported with --file.")
 
     # --- URL mode ---
     if args.url:
@@ -143,7 +180,7 @@ def main() -> None:
             _print_summary(result)
         return
 
-    # --- File mode (single paths or patterns) ---
+    # --- File mode ---
     paths = _resolve_paths(args.file)
     missing = [p for p in paths if not p.exists()]
     if missing:
@@ -155,21 +192,41 @@ def main() -> None:
     all_results = []
     exit_code = 0
 
-    for path in paths:
-        try:
-            result = _process_file(path, args)
-        except ValueError as e:
-            print(f"Error [{path.name}]: {e}", file=sys.stderr)
-            exit_code = 1
-            if args.output_json:
-                all_results.append({"file": str(path), "status": "error", "error": str(e)})
-            continue
+    if args.write_exif:
+        from exiftool import ExifToolHelper
+        exif_ctx = ExifToolHelper()
+    else:
+        exif_ctx = None
 
-        if args.output_json:
-            entry = _strip_samples(result) if args.no_samples else result
-            all_results.append({"file": str(path), **entry})
-        else:
-            _print_summary(result, label=path.name if multi else None)
+    try:
+        for path in paths:
+            exif_before = None
+            if exif_ctx is not None:
+                exif_before = _read_exif_rp(exif_ctx, path)
+
+            try:
+                result = _process_file(path, args)
+            except ValueError as e:
+                print(f"Error [{path.name}]: {e}", file=sys.stderr)
+                exit_code = 1
+                if args.output_json:
+                    all_results.append({"file": str(path), "status": "error", "error": str(e)})
+                continue
+
+            if exif_ctx is not None and result["roll"] is not None and result["pitch"] is not None:
+                _write_exif_rp(exif_ctx, path, result["roll"], result["pitch"])
+
+            if args.output_json:
+                entry = _strip_samples(result) if args.no_samples else result
+                if exif_before:
+                    entry = {"exif_before": exif_before, **entry}
+                all_results.append({"file": str(path), **entry})
+            else:
+                _print_summary(result, label=path.name if multi else None, exif_before=exif_before)
+
+    finally:
+        if exif_ctx is not None:
+            exif_ctx.__exit__(None, None, None)
 
     if args.output_json:
         output = all_results if multi else all_results[0]
