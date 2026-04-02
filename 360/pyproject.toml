@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geocalib-360"
+version = "1.0"
+description = "360° pitch/roll estimation CLI and web app using GeoCalib"
+requires-python = ">=3.9"
+dependencies = [
+    "torch",
+    "torchvision",
+    "opencv-python",
+    "numpy",
+    "py360convert",
+    "geocalib",
+    "flask",
+    "werkzeug",
+]
+
+[project.scripts]
+geocalib-360 = "cli:main"
+
+[tool.uv.sources]
+geocalib = { path = ".." }
+
+[tool.setuptools]
+packages = []
+py-modules = ["cli", "core", "app"]
