@@ -7,6 +7,7 @@ import argparse
 import glob as glob_module
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -69,8 +70,11 @@ def _process_file(path: Path, args: argparse.Namespace) -> dict:
 
 def _print_summary(result: dict, label: str | None = None, exif_before: dict | None = None) -> None:
     """Print a human-readable summary of a single prediction result."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if label:
-        print(f"\n=== {label} ===")
+        print(f"\n[{ts}] === {label} ===")
+    else:
+        print(f"[{ts}]")
     if exif_before:
         r, p = exif_before.get("roll"), exif_before.get("pitch")
         if r is not None or p is not None:
