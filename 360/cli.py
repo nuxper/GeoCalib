@@ -53,7 +53,7 @@ def _write_exif_rp(et, path: Path, roll: float, pitch: float) -> None:
     """Write PoseRollDegrees and PosePitchDegrees to a file (overwrites original)."""
     et.set_tags(
         str(path),
-        {_EXIF_ROLL_TAG: roll, _EXIF_PITCH_TAG: -pitch},
+        {_EXIF_ROLL_TAG: roll, _EXIF_PITCH_TAG: pitch},
         ["-overwrite_original"],
     )
 

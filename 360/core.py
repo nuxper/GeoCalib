@@ -403,7 +403,7 @@ def _build_result(
     sample_count = len(sample_yaws)
     tan_beta = np.tan(best["beta_rad"])
     roll_deg = float(np.rad2deg(np.arctan(tan_beta * np.cos(best["alpha_rad"]))))
-    pitch_deg = float(np.rad2deg(-np.arctan(tan_beta * np.sin(best["alpha_rad"]))))
+    pitch_deg = float(np.rad2deg(np.arctan(tan_beta * np.sin(best["alpha_rad"]))))
 
     samples = [
         {

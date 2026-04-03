@@ -405,7 +405,7 @@
                 // Z-axis is Right-Left orientation -> Pitch
                 // User reported Roll was still swapped
                 correctionGroup.rotation.x = THREE.MathUtils.degToRad(-currentRoll);
-                correctionGroup.rotation.z = THREE.MathUtils.degToRad(currentPitch);
+                correctionGroup.rotation.z = THREE.MathUtils.degToRad(-currentPitch);
             } else {
                 status.textContent = "Original View";
                 status.style.color = "#fff";
