@@ -94,7 +94,7 @@ def _strip_samples(result: dict) -> dict:
     return {k: v for k, v in result.items() if k != "samples"}
 
 
-def main() -> None:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Estimate pitch and roll of a 360° equirectangular image."
     )
@@ -149,6 +149,16 @@ def main() -> None:
             "Requires exiftool to be installed. Only applies to --file mode."
         ),
     )
+    parser.add_argument(
+        "--min-inlier-ratio",
+        type=float,
+        default=0.0,
+        metavar="RATIO",
+        help=(
+            "Minimum inlier ratio (0–1) required to write EXIF tags with --write-exif. "
+            "Predictions below this threshold are skipped (default: 0, i.e. always write)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -158,8 +168,16 @@ def main() -> None:
         parser.error("--inlier-threshold-deg must be between 0.01 and 90.")
     if not (4 <= args.sample_count <= MAX_SAMPLE_COUNT):
         parser.error(f"--sample-count must be between 4 and {MAX_SAMPLE_COUNT}.")
+    if not (0.0 <= args.min_inlier_ratio <= 1.0):
+        parser.error("--min-inlier-ratio must be between 0 and 1.")
     if args.write_exif and args.url:
         parser.error("--write-exif is only supported with --file.")
+
+    return args
+
+
+def main() -> None:
+    args = _parse_args()
 
     # --- URL mode ---
     if args.url:
@@ -217,13 +235,24 @@ def main() -> None:
                     all_results.append({"file": str(path), "status": "error", "error": str(e)})
                 continue
 
+            exif_written = False
             if exif_ctx is not None and result["roll"] is not None and result["pitch"] is not None:
-                _write_exif_rp(exif_ctx, path, result["roll"], result["pitch"])
+                inlier_ratio = result.get("inlier_ratio") or 0.0
+                if inlier_ratio >= args.min_inlier_ratio:
+                    _write_exif_rp(exif_ctx, path, result["roll"], result["pitch"])
+                    exif_written = True
+                elif not args.output_json:
+                    print(
+                        f"EXIF write skipped: inlier ratio {inlier_ratio:.1%}"
+                        f" < {args.min_inlier_ratio:.1%} minimum"
+                    )
 
             if args.output_json:
                 entry = _strip_samples(result) if args.no_samples else result
                 if exif_before:
                     entry = {"exif_before": exif_before, **entry}
+                if exif_ctx is not None:
+                    entry = {**entry, "exif_written": exif_written}
                 all_results.append({"file": str(path), **entry})
             else:
                 _print_summary(result, label=path.name if multi else None, exif_before=exif_before)
