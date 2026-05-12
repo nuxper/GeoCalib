@@ -39,6 +39,32 @@ _HTML = """\
     html, body { height: 100%; background: #111; color: #eee; font-family: monospace; }
     body { display: flex; flex-direction: column; }
 
+    #main        { display: flex; flex: 1; min-height: 0; }
+
+    /* Sidebar */
+    #sidebar {
+      width: 210px; flex-shrink: 0;
+      overflow-y: auto; overflow-x: hidden;
+      background: #141414; border-right: 1px solid #2a2a2a;
+    }
+    #sidebar::-webkit-scrollbar { width: 5px; }
+    #sidebar::-webkit-scrollbar-thumb { background: #333; }
+    .si {
+      padding: 4px 10px; cursor: pointer;
+      font-size: 12px; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+      border-bottom: 1px solid #1e1e1e;
+      color: #aaa;
+    }
+    .si:hover   { background: #222; }
+    .si.active  { background: #1a3050; color: #8cf; }
+    .si.ok      { color: #5d5; }
+    .si.warn    { color: #fa0; }
+    .si.bad     { color: #f55; }
+    .si.active.ok   { color: #8f8; }
+    .si.active.warn { color: #fd4; }
+    .si.active.bad  { color: #f77; }
+
     #viewer-wrap { position: relative; flex: 1; min-height: 0; }
     #viewer      { width: 100%; height: 100%; }
 
@@ -72,9 +98,14 @@ _HTML = """\
     #btn-toggle.off           { background: #4a1a1a; border-color: #f55; color: #f55; }
 
     #filename { font-weight: bold; }
-    #pose      { margin-left: 14px; color: #aaa; }
     #inlier    { margin-left: 14px; }
     #counter   { margin-left: auto; color: #888; }
+
+    #controls { display: flex; gap: 10px; align-items: center; margin-left: 14px; }
+    #controls label { display: flex; align-items: center; gap: 5px; color: #aaa; font-size: 12px; }
+    #controls input[type=range] { width: 90px; accent-color: #5af; cursor: pointer; }
+    #controls .val { min-width: 46px; color: #ddd; font-size: 12px; }
+    #btn-reset { padding: 3px 7px; font-size: 12px; }
 
     .tag-ok   { color: #5f5; }
     .tag-warn { color: #fa0; }
@@ -83,10 +114,13 @@ _HTML = """\
   </style>
 </head>
 <body>
-  <div id="viewer-wrap">
-    <div id="viewer"></div>
-    <div id="horizon"></div>
-    <div id="vertical"></div>
+  <div id="main">
+    <div id="sidebar"></div>
+    <div id="viewer-wrap">
+      <div id="viewer"></div>
+      <div id="horizon"></div>
+      <div id="vertical"></div>
+    </div>
   </div>
   <div id="bar">
     <div id="nav">
@@ -95,8 +129,12 @@ _HTML = """\
       <button id="btn-toggle" class="on">Correction ON</button>
     </div>
     <span id="filename">—</span>
-    <span id="pose"></span>
     <span id="inlier"></span>
+    <div id="controls">
+      <label>roll  <input id="sl-roll"  type="range" min="-45" max="45" step="0.1" value="0"><span id="val-roll"  class="val">0.0°</span></label>
+      <label>pitch <input id="sl-pitch" type="range" min="-45" max="45" step="0.1" value="0"><span id="val-pitch" class="val">0.0°</span></label>
+      <button id="btn-reset" title="Reset to original values">&#8635;</button>
+    </div>
     <span id="counter"></span>
   </div>
 
@@ -106,6 +144,7 @@ _HTML = """\
     const images = __IMAGES__;
     let current = 0;
     let corrected = true;
+    let manualRoll = 0, manualPitch = 0;
 
     const viewer = new PhotoSphereViewer.Viewer({
       container: document.getElementById('viewer'),
@@ -118,9 +157,16 @@ _HTML = """\
       touchmoveTwoFingers: false,
     });
 
-    function poseData(img) {
+    function poseData() {
       if (!corrected) return { poseRoll: 0, posePitch: 0 };
-      return { poseRoll: img.roll ?? 0, posePitch: img.pitch ?? 0 };
+      return { poseRoll: manualRoll, posePitch: manualPitch };
+    }
+
+    function updateSliders() {
+      document.getElementById('sl-roll').value  = manualRoll;
+      document.getElementById('sl-pitch').value = manualPitch;
+      document.getElementById('val-roll').textContent  = (manualRoll  >= 0 ? '+' : '') + manualRoll.toFixed(1)  + '°';
+      document.getElementById('val-pitch').textContent = (manualPitch >= 0 ? '+' : '') + manualPitch.toFixed(1) + '°';
     }
 
     function inlierTag(ratio) {
@@ -136,43 +182,99 @@ _HTML = """\
       else           { btn.textContent = 'Correction OFF'; btn.className = 'off'; }
     }
 
-    function applyPose(yaw = 0, pitch = 0) {
+    function applyPose(yaw = 0, pitch = 0, zoom = null) {
       const img = images[current];
       viewer.setPanorama(img.url, {
-        panoData: poseData(img),
+        panoData: poseData(),
         transition: false,
         showLoader: false,
+      }).then(() => {
+        viewer.rotate({ yaw, pitch });
+        if (zoom !== null) viewer.zoom(zoom);
       });
-      viewer.rotate({ yaw, pitch });
+    }
+
+    function reapplyPose() {
+      const pos  = viewer.getPosition();
+      const zoom = viewer.getZoomLevel();
+      const img  = images[current];
+      viewer.setPanorama(img.url, {
+        panoData: poseData(),
+        transition: false,
+        showLoader: false,
+      }).then(() => {
+        viewer.rotate({ yaw: pos.yaw, pitch: pos.pitch });
+        viewer.zoom(zoom);
+      });
+    }
+
+    function inlierClass(ratio) {
+      if (ratio == null) return '';
+      return ratio >= 0.6 ? 'ok' : ratio >= 0.4 ? 'warn' : 'bad';
+    }
+
+    function buildSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      images.forEach((img, i) => {
+        const el = document.createElement('div');
+        el.className = 'si ' + inlierClass(img.inlier_ratio);
+        el.textContent = img.name;
+        el.title = img.name;
+        el.addEventListener('click', () => navigate(i));
+        sidebar.appendChild(el);
+      });
+    }
+
+    function updateSidebar() {
+      const items = document.querySelectorAll('.si');
+      items.forEach((el, i) => el.classList.toggle('active', i === current));
+      items[current]?.scrollIntoView({ block: 'nearest' });
     }
 
     function navigate(index) {
+      const zoom = viewer.getZoomLevel();
       current = ((index % images.length) + images.length) % images.length;
       const img = images[current];
-      applyPose(0, 0);
+      manualRoll  = img.roll  ?? 0;
+      manualPitch = img.pitch ?? 0;
+      updateSliders();
+      applyPose(0, 0, zoom);
       document.getElementById('filename').textContent = img.name;
-      const r = img.roll  != null ? (img.roll  >= 0 ? '+' : '') + img.roll.toFixed(2)  + '°' : 'N/A';
-      const p = img.pitch != null ? (img.pitch >= 0 ? '+' : '') + img.pitch.toFixed(2) + '°' : 'N/A';
-      document.getElementById('pose').textContent = `roll ${r}   pitch ${p}`;
       document.getElementById('inlier').innerHTML = inlierTag(img.inlier_ratio);
       document.getElementById('counter').textContent = `${current + 1} / ${images.length}`;
+      updateSidebar();
     }
 
     function toggleCorrection() {
       const pos = viewer.getPosition();
-      const img = images[current];
-      // Compensate the pitch offset so the same scene point stays centred.
-      // In corrected mode the sphere is rotated by posePitch, so switching modes
-      // shifts the apparent pitch by ±posePitch.
-      const pitchDelta = (img.pitch ?? 0) * Math.PI / 180;
+      const zoom = viewer.getZoomLevel();
+      const pitchDelta = manualPitch * Math.PI / 180;
       corrected = !corrected;
       updateToggleButton();
-      applyPose(pos.yaw, pos.pitch + (corrected ? pitchDelta : -pitchDelta));
+      applyPose(pos.yaw, pos.pitch + (corrected ? pitchDelta : -pitchDelta), zoom);
     }
 
     document.getElementById('btn-prev').onclick   = () => navigate(current - 1);
     document.getElementById('btn-next').onclick   = () => navigate(current + 1);
     document.getElementById('btn-toggle').onclick = () => toggleCorrection();
+
+    document.getElementById('sl-roll').oninput = e => {
+      manualRoll = parseFloat(e.target.value);
+      document.getElementById('val-roll').textContent = (manualRoll >= 0 ? '+' : '') + manualRoll.toFixed(1) + '°';
+      reapplyPose();
+    };
+    document.getElementById('sl-pitch').oninput = e => {
+      manualPitch = parseFloat(e.target.value);
+      document.getElementById('val-pitch').textContent = (manualPitch >= 0 ? '+' : '') + manualPitch.toFixed(1) + '°';
+      reapplyPose();
+    };
+    document.getElementById('btn-reset').onclick = () => {
+      const img = images[current];
+      manualRoll  = img.roll  ?? 0;
+      manualPitch = img.pitch ?? 0;
+      updateSliders();
+      reapplyPose();
+    };
 
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT') return;
@@ -183,6 +285,7 @@ _HTML = """\
       if (e.key === 'End')  navigate(images.length - 1);
     });
 
+    buildSidebar();
     navigate(0);
   </script>
 </body>
