@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geocalib-viewer"
+version = "1.0"
+description = "Web viewer for 360° panoramas with roll/pitch correction"
+requires-python = ">=3.9"
+dependencies = [
+    "flask",
+    "pyexiftool",
+]
+
+[project.scripts]
+geocalib-viewer = "viewer:main"
+
+[tool.setuptools]
+packages = []
+py-modules = ["viewer"]

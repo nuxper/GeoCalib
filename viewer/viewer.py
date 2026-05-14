@@ -2,7 +2,10 @@
 """Web viewer for 360° panoramas with roll/pitch correction and keyboard navigation.
 
 Usage:
-    uv run viewer.py /path/to/images [--port 5001] [--results geocalib_results.json]
+    python viewer.py /path/to/images [--port 5001] [--results geocalib_results.json]
+
+    # In Docker (images mounted at /data):
+    docker run -v /my/panos:/data -p 5001:5001 geocalib-viewer /data
 
 Keyboard shortcuts:
   ← / → (or A / D)  navigate between images
@@ -386,11 +389,14 @@ def main() -> None:
     )
     parser.add_argument("directory", type=Path, help="Directory containing equirectangular JPEGs.")
     parser.add_argument("--port", type=int, default=5001, metavar="PORT", help="HTTP port (default: 5001).")
+    parser.add_argument("--host", default="127.0.0.1", metavar="HOST",
+                        help="Host to bind to (default: 127.0.0.1; use 0.0.0.0 to expose on the network).")
     parser.add_argument(
         "--results", type=Path, default=None, metavar="JSON",
         help="Optional geocalib_results.json to show inlier ratios.",
     )
     parser.add_argument("--start", type=int, default=0, metavar="N", help="Start at image index N (default: 0).")
+    parser.add_argument("--no-browser", action="store_true", help="Do not open a browser tab automatically.")
     args = parser.parse_args()
 
     if not args.directory.is_dir():
@@ -421,9 +427,10 @@ def main() -> None:
     app = _build_app(args.directory, images)
 
     url = f"http://localhost:{args.port}?start={args.start}"
-    threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    if not args.no_browser:
+        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     print(f"Serving {len(images)} images at {url}  (Ctrl-C to stop)")
-    app.run(host="127.0.0.1", port=args.port, debug=False)
+    app.run(host=args.host, port=args.port, debug=False)
 
 
 if __name__ == "__main__":
