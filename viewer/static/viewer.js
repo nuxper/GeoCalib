@@ -100,6 +100,20 @@ function toggleCorrection() {
   applyPose(pos.yaw, pos.pitch + (corrected ? pitchDelta : -pitchDelta), zoom);
 }
 
+const STEP = 0.5;
+document.querySelectorAll('.btn-step').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const delta = parseFloat(btn.dataset.dir) * STEP;
+    if (btn.dataset.axis === 'roll') {
+      manualRoll  = Math.max(-45, Math.min(45, Math.round((manualRoll  + delta) * 10) / 10));
+    } else {
+      manualPitch = Math.max(-45, Math.min(45, Math.round((manualPitch + delta) * 10) / 10));
+    }
+    updateSliders();
+    reapplyPose();
+  });
+});
+
 document.getElementById('btn-prev').onclick   = () => navigate(current - 1);
 document.getElementById('btn-next').onclick   = () => navigate(current + 1);
 document.getElementById('btn-toggle').onclick = () => toggleCorrection();

@@ -69,6 +69,7 @@ button:hover { background: #4a4a4a; }
 #controls input[type=range] { width: 90px; accent-color: #5af; cursor: pointer; }
 #controls .val { min-width: 46px; color: #ddd; font-size: 12px; }
 #btn-reset { padding: 3px 7px; font-size: 12px; }
+.btn-step  { padding: 1px 6px; font-size: 13px; min-width: 22px; }
 
 .tag-ok   { color: #5f5; }
 .tag-warn { color: #fa0; }
