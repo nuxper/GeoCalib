@@ -124,7 +124,7 @@ def main() -> None:
         description="Web viewer for 360° panoramas with roll/pitch correction."
     )
     parser.add_argument("directory", type=Path, help="Directory containing equirectangular JPEGs.")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 5001)), metavar="PORT", help="HTTP port (default: 5001, or $PORT).")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 6001)), metavar="PORT", help="HTTP port (default: 6001, or $PORT).")
     parser.add_argument("--host", default="127.0.0.1", metavar="HOST",
                         help="Host to bind to (default: 127.0.0.1; use 0.0.0.0 to expose on the network).")
     parser.add_argument(

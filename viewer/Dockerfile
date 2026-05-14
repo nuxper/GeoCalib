@@ -10,7 +10,7 @@ COPY templates/ templates/
 COPY static/ static/
 RUN pip install --no-cache-dir .
 
-EXPOSE 5001
+EXPOSE 6001
 
 ENTRYPOINT ["python", "viewer.py", "--host", "0.0.0.0", "--no-browser"]
 CMD ["/data"]
