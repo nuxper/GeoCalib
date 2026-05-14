@@ -1,8 +1,9 @@
 services:
   viewer:
     image: ghcr.io/nuxper/geocalib-viewer:latest
-    ports:
-      - "5001:5001"
+    network_mode: host
+    environment:
+      - PORT=6001
     volumes:
       - ${IMAGES_DIR:-/data}:/data:ro
     restart: unless-stopped
