@@ -35,21 +35,11 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5/index.min.js"></script>
   <script>
-    const images = {{ images | tojson }};
+    let images = [];
+    let viewer = null;
     let current = 0;
     let corrected = true;
     let manualRoll = 0, manualPitch = 0;
-
-    const viewer = new PhotoSphereViewer.Viewer({
-      container: document.getElementById('viewer'),
-      panorama: images[0].url,
-      panoData: poseData(images[0]),
-      defaultPitch: 0,
-      defaultYaw: 0,
-      navbar: false,
-      loadingImg: null,
-      touchmoveTwoFingers: false,
-    });
 
     function poseData() {
       if (!corrected) return { poseRoll: 0, posePitch: 0 };
@@ -179,8 +169,25 @@
       if (e.key === 'End')  navigate(images.length - 1);
     });
 
-    buildSidebar();
-    navigate({{ start }});
+    const start = parseInt(new URLSearchParams(window.location.search).get('start') ?? '0');
+
+    fetch('/api/images')
+      .then(r => r.json())
+      .then(data => {
+        images = data;
+        viewer = new PhotoSphereViewer.Viewer({
+          container: document.getElementById('viewer'),
+          panorama: images[0].url,
+          panoData: poseData(),
+          defaultPitch: 0,
+          defaultYaw: 0,
+          navbar: false,
+          loadingImg: null,
+          touchmoveTwoFingers: false,
+        });
+        buildSidebar();
+        navigate(start);
+      });
   </script>
 </body>
 </html>

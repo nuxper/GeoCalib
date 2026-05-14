@@ -22,7 +22,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from flask import Flask, abort, render_template, request, send_file
+from flask import Flask, abort, jsonify, render_template, request, send_file
 
 _EXIF_ROLL_TAG_WRITE = "XMP-GPano:PoseRollDegrees"   # tag name used when writing
 _EXIF_ROLL_TAG_READ  = "XMP:PoseRollDegrees"          # tag name returned when reading
@@ -102,8 +102,11 @@ def _build_app(directory: Path, images: list[dict]) -> Flask:
 
     @app.route("/")
     def index():
-        start = int(request.args.get("start", "0"))
-        return render_template("index.html", images=images, start=start)
+        return render_template("index.html")
+
+    @app.route("/api/images")
+    def api_images():
+        return jsonify(images)
 
     @app.route("/image/<path:name>")
     def image(name):
